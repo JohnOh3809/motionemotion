@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Data & model artifacts (don't commit large/binary training files)
+data/
+data_bold/
+data_acted/
+clips/
+checkpoints/
+*.pt
+*.onnx
+*.npz
+*.mp4
+*.mov
+*.webm
+*.zip
+
+# OS
+.DS_Store
