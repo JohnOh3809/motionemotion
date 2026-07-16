@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MotionEmotion — Emotion from Body Movement</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    padding: 20px;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  h1 span { color: var(--accent); }
+  .subtitle { color: var(--muted); margin-bottom: 16px; font-size: .9rem; }
+  .layout { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; max-width: 1200px; }
+  .video-wrap { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  video { display: block; width: 640px; max-width: 90vw; transform: scaleX(-1); }
+  canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); pointer-events: none; }
+  .big-emotion {
+    position: absolute; top: 12px; left: 12px; background: rgba(13,17,23,.75);
+    border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px;
+    font-size: 1.3rem; font-weight: 600; backdrop-filter: blur(4px);
+  }
+  .big-emotion .emoji { font-size: 1.6rem; margin-right: 8px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; width: 320px; max-width: 90vw;
+  }
+  .panel h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 12px; }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .bar-label { width: 92px; font-size: .85rem; }
+  .bar-track { flex: 1; height: 14px; background: #21262d; border-radius: 7px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 7px; width: 0%; transition: width .25s ease; }
+  .bar-val { width: 38px; font-size: .75rem; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .features { margin-top: 18px; font-size: .8rem; color: var(--muted); line-height: 1.7; }
+  .features b { color: var(--text); font-weight: 500; }
+  #status { margin-top: 14px; color: var(--muted); font-size: .85rem; }
+  button {
+    background: var(--accent); color: #0d1117; border: none; border-radius: 8px;
+    padding: 10px 22px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 14px;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  footer { margin-top: 18px; color: var(--muted); font-size: .75rem; max-width: 640px; text-align: center; }
+</style>
+</head>
+<body>
+  <h1>Motion<span>Emotion</span></h1>
+  <div class="subtitle">Expressing emotion through body movement — no facial expressions needed</div>
+
+  <div class="layout">
+    <div class="video-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div class="big-emotion" id="bigEmotion" style="display:none"><span class="emoji">🙂</span><span class="name">neutral</span></div>
+    </div>
+    <div class="panel">
+      <h2>Emotion probabilities</h2>
+      <div id="bars"></div>
+      <h2 style="margin-top:18px">Motion features</h2>
+      <div class="features" id="features">waiting for pose…</div>
+    </div>
+  </div>
+
+  <button id="startBtn">Start camera</button>
+  <div id="status">Click “Start camera” to begin.</div>
+
+  <footer>
+    All processing happens locally in your browser. The starter classifier uses interpretable
+    motion heuristics (energy, posture openness, jerkiness, expansion…). Swap it for a trained
+    model from the included training pipeline for better accuracy.
+  </footer>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const EMOTIONS = [
+  { name: "happy",     emoji: "😄", color: "#3fb950" },
+  { name: "sad",       emoji: "😢", color: "#58a6ff" },
+  { name: "angry",     emoji: "😠", color: "#f85149" },
+  { name: "fearful",   emoji: "😨", color: "#a371f7" },
+  { name: "surprised", emoji: "😲", color: "#d29922" },
+  { name: "disgusted", emoji: "🤢", color: "#7ee787" },
+  { name: "neutral",   emoji: "🙂", color: "#8b949e" },
+];
+
+// MediaPipe pose landmark indices
+const L = {
+  NOSE: 0, L_EYE: 2, R_EYE: 5, L_EAR: 7, R_EAR: 8,
+  L_SHOULDER: 11, R_SHOULDER: 12, L_ELBOW: 13, R_ELBOW: 14,
+  L_WRIST: 15, R_WRIST: 16, L_HIP: 23, R_HIP: 24,
+  L_KNEE: 25, R_KNEE: 26, L_ANKLE: 27, R_ANKLE: 28,
+};
+const CONNECTIONS = [
+  [11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],
+  [23,24],[23,25],[25,27],[24,26],[26,28],[0,11],[0,12],
+];
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("overlay");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const bigEmotion = document.getElementById("bigEmotion");
+const barsEl = document.getElementById("bars");
+const featuresEl = document.getElementById("features");
+
+// build bars
+const barFills = {}, barVals = {};
+for (const e of EMOTIONS) {
+  const row = document.createElement("div");
+  row.className = "bar-row";
+  row.innerHTML = `<div class="bar-label">${e.emoji} ${e.name}</div>
+    <div class="bar-track"><div class="bar-fill" style="background:${e.color}"></div></div>
+    <div class="bar-val">0%</div>`;
+  barsEl.appendChild(row);
+  barFills[e.name] = row.querySelector(".bar-fill");
+  barVals[e.name] = row.querySelector(".bar-val");
+}
+
+// ---------- rolling buffer of poses ----------
+const WINDOW_MS = 2000;
+const buffer = []; // { t, pts: [{x,y,visibility}...] }
+
+function pushPose(t, pts) {
+  buffer.push({ t, pts });
+  while (buffer.length && t - buffer[0].t > WINDOW_MS) buffer.shift();
+}
+
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+// ---------- feature extraction over the window ----------
+function computeFeatures() {
+  if (buffer.length < 6) return null;
+  const latest = buffer[buffer.length - 1].pts;
+  const shoulderW = dist(latest[L.L_SHOULDER], latest[L.R_SHOULDER]) || 1e-3;
+  const norm = (v) => v / shoulderW; // scale-invariant
+
+  // velocities of key points across the buffer (normalized units / second)
+  const track = [L.L_WRIST, L.R_WRIST, L.L_ELBOW, L.R_ELBOW, L.NOSE, L.L_SHOULDER, L.R_SHOULDER];
+  let speeds = [], accels = [], prevSpeed = null;
+  for (let i = 1; i < buffer.length; i++) {
+    const dt = (buffer[i].t - buffer[i - 1].t) / 1000;
+    if (dt <= 0) continue;
+    let s = 0;
+    for (const j of track) s += dist(buffer[i].pts[j], buffer[i - 1].pts[j]);
+    s = norm(s / track.length) / dt;
+    speeds.push(s);
+    if (prevSpeed !== null) accels.push(Math.abs(s - prevSpeed) / dt);
+    prevSpeed = s;
+  }
+  const mean = (a) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
+  const energy = mean(speeds);                       // overall movement
+  const jerkiness = mean(accels);                    // sharp starts/stops
+  const peak = Math.max(...speeds, 0);               // burst detection
+
+  // posture (from latest frame)
+  const sh = mid(latest[L.L_SHOULDER], latest[L.R_SHOULDER]);
+  const hp = mid(latest[L.L_HIP], latest[L.R_HIP]);
+  const nose = latest[L.NOSE];
+
+  const armSpread = norm(dist(latest[L.L_WRIST], latest[L.R_WRIST]));      // openness
+  const handsUp = ((sh.y - latest[L.L_WRIST].y) + (sh.y - latest[L.R_WRIST].y)) / 2 / shoulderW; // + = above shoulders
+  const headDrop = (nose.y - sh.y) / shoulderW;      // larger = head hanging low
+  const slouch = Math.abs(sh.x - hp.x) / shoulderW;  // lateral lean
+  const contraction = 1 / (1 + norm(
+    dist(latest[L.L_WRIST], hp) + dist(latest[L.R_WRIST], hp)
+  ));                                                // limbs pulled toward body
+  const handsToFace = 1 / (1 + norm(
+    Math.min(dist(latest[L.L_WRIST], nose), dist(latest[L.R_WRIST], nose)) * 2
+  ));                                                // hands near face/chest
+
+  // vertical expansion over window (rising = positive)
+  const oldSh = mid(buffer[0].pts[L.L_SHOULDER], buffer[0].pts[L.R_SHOULDER]);
+  const rise = (oldSh.y - sh.y) / shoulderW;
+
+  // trembling: high-frequency low-amplitude wrist oscillation
+  let flips = 0;
+  for (let i = 2; i < buffer.length; i++) {
+    const d1 = buffer[i].pts[L.L_WRIST].y - buffer[i-1].pts[L.L_WRIST].y;
+    const d0 = buffer[i-1].pts[L.L_WRIST].y - buffer[i-2].pts[L.L_WRIST].y;
+    if (d1 * d0 < 0) flips++;
+  }
+  const tremble = flips / buffer.length;
+
+  return { energy, jerkiness, peak, armSpread, handsUp, headDrop, slouch, contraction, handsToFace, rise, tremble };
+}
+
+// ---------- heuristic scoring ----------
+// Each emotion gets a linear score over features; softmax → probabilities.
+const sig = (x) => 1 / (1 + Math.exp(-x));
+function scoreEmotions(f) {
+  const s = {};
+  s.happy     = 2.2 * sig(4 * (f.energy - 0.5)) + 1.8 * sig(6 * f.handsUp) + 1.2 * sig(3 * (f.armSpread - 1.6)) + 1.0 * sig(8 * f.rise) - 1.0 * f.jerkiness * 0.15;
+  s.sad       = 2.0 * sig(4 * (0.25 - f.energy)) + 2.0 * sig(5 * (f.headDrop - 0.85)) + 1.2 * f.contraction * 2 - 1.5 * sig(6 * f.handsUp);
+  s.angry     = 2.0 * sig(0.25 * (f.jerkiness - 6)) + 1.6 * sig(4 * (f.energy - 0.9)) + 0.8 * sig(3 * (1.4 - f.armSpread)) - 0.8 * f.tremble;
+  s.fearful   = 1.8 * f.contraction * 2 + 1.6 * sig(6 * (f.tremble - 0.45)) + 1.4 * f.handsToFace * 2 - 1.0 * sig(3 * (f.energy - 1.2));
+  s.surprised = 2.4 * sig(1.5 * (f.peak - 2.2)) + 1.4 * sig(6 * f.handsUp) + 1.0 * sig(8 * f.rise);
+  s.disgusted = 1.4 * sig(5 * (f.slouch - 0.45)) + 1.2 * f.handsToFace * 2 + 0.8 * sig(4 * (0.5 - f.energy)) + 0.6 * sig(5 * (f.headDrop - 0.7));
+  s.neutral   = 2.6 * sig(5 * (0.35 - f.energy)) + 1.2 * sig(5 * (0.75 - f.headDrop)) - 1.0 * f.contraction;
+
+  // softmax with temperature
+  const T = 0.8;
+  const names = EMOTIONS.map(e => e.name);
+  const mx = Math.max(...names.map(n => s[n]));
+  let Z = 0; const p = {};
+  for (const n of names) { p[n] = Math.exp((s[n] - mx) / T); Z += p[n]; }
+  for (const n of names) p[n] /= Z;
+  return p;
+}
+
+// exponential smoothing of probabilities
+let smoothed = null;
+function smooth(p, alpha = 0.12) {
+  if (!smoothed) { smoothed = { ...p }; return smoothed; }
+  for (const k in p) smoothed[k] = smoothed[k] * (1 - alpha) + p[k] * alpha;
+  return smoothed;
+}
+
+// ---------- rendering ----------
+function drawSkeleton(pts) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "rgba(88,166,255,0.9)";
+  ctx.lineWidth = 3;
+  for (const [a, b] of CONNECTIONS) {
+    if ((pts[a].visibility ?? 1) < 0.4 || (pts[b].visibility ?? 1) < 0.4) continue;
+    ctx.beginPath();
+    ctx.moveTo(pts[a].x * canvas.width, pts[a].y * canvas.height);
+    ctx.lineTo(pts[b].x * canvas.width, pts[b].y * canvas.height);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "#3fb950";
+  for (const j of Object.values(L)) {
+    if ((pts[j].visibility ?? 1) < 0.4) continue;
+    ctx.beginPath();
+    ctx.arc(pts[j].x * canvas.width, pts[j].y * canvas.height, 5, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
+
+function render(p, f) {
+  let top = EMOTIONS[6];
+  for (const e of EMOTIONS) {
+    const v = p[e.name];
+    barFills[e.name].style.width = (v * 100).toFixed(1) + "%";
+    barVals[e.name].textContent = (v * 100).toFixed(0) + "%";
+    if (v > p[top.name]) top = e;
+  }
+  bigEmotion.style.display = "block";
+  bigEmotion.querySelector(".emoji").textContent = top.emoji;
+  bigEmotion.querySelector(".name").textContent = top.name;
+  featuresEl.innerHTML =
+    `energy <b>${f.energy.toFixed(2)}</b> · jerkiness <b>${f.jerkiness.toFixed(1)}</b> · burst <b>${f.peak.toFixed(2)}</b><br>` +
+    `openness <b>${f.armSpread.toFixed(2)}</b> · hands-up <b>${f.handsUp.toFixed(2)}</b> · head-drop <b>${f.headDrop.toFixed(2)}</b><br>` +
+    `contraction <b>${(f.contraction*2).toFixed(2)}</b> · tremble <b>${f.tremble.toFixed(2)}</b> · rise <b>${f.rise.toFixed(2)}</b>`;
+}
+
+// ---------- main loop ----------
+let landmarker = null, running = false, lastVideoTime = -1;
+
+async function init() {
+  statusEl.textContent = "Loading pose model…";
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  landmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numPoses: 1,
+  });
+}
+
+async function start() {
+  document.getElementById("startBtn").disabled = true;
+  try {
+    if (!landmarker) await init();
+    statusEl.textContent = "Requesting camera…";
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+    video.srcObject = stream;
+    await new Promise((res) => (video.onloadedmetadata = res));
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    running = true;
+    statusEl.textContent = "Running — move your body to express an emotion!";
+    requestAnimationFrame(loop);
+  } catch (err) {
+    statusEl.textContent = "Error: " + err.message;
+    document.getElementById("startBtn").disabled = false;
+  }
+}
+
+function loop() {
+  if (!running) return;
+  if (video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    const t = performance.now();
+    const result = landmarker.detectForVideo(video, t);
+    if (result.landmarks && result.landmarks.length > 0) {
+      const pts = result.landmarks[0];
+      pushPose(t, pts);
+      drawSkeleton(pts);
+      const f = computeFeatures();
+      if (f) render(smooth(scoreEmotions(f)), f);
+    } else {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+  requestAnimationFrame(loop);
+}
+
+document.getElementById("startBtn").addEventListener("click", start);
+</script>
+</body>
+</html>
