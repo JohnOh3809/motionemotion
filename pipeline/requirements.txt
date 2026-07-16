@@ -1,0 +1,7 @@
+mediapipe>=0.10
+opencv-python>=4.8
+numpy>=1.24
+torch>=2.1
+deepface>=0.0.90
+tf-keras  # required by deepface with TF>=2.16
+onnx>=1.15
