@@ -1,36 +1,47 @@
 """Run the trained model live on webcam (or a video file), and export to ONNX.
 
 Usage:
-    python infer.py --ckpt checkpoints/best.pt                # webcam
-    python infer.py --ckpt checkpoints/best.pt --video x.mp4  # video file
-    python infer.py --ckpt checkpoints/best.pt --export-onnx model.onnx
+    python infer.py --ckpt checkpoints/best.pt                     # webcam
+    python infer.py --ckpt checkpoints/best.pt --video x.mp4       # video file
+    python infer.py --ckpt checkpoints/best.pt --export-onnx motionemotion.onnx
+
+The ONNX export also writes a <name>.json metadata sidecar (class list +
+window size). Drop both files next to app/index.html and serve the folder
+(python -m http.server) — the web app picks the model up automatically.
 """
 import argparse
+import json
 from collections import deque
+from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
 
-from dataset import EMOTIONS, to_features
+from dataset import to_features
 from model import build_model
 
 
 def load(ckpt_path, device):
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-    model = build_model(ckpt["arch"]).to(device)
+    emotions = ckpt["emotions"]
+    model = build_model(ckpt["arch"], num_classes=len(emotions)).to(device)
     model.load_state_dict(ckpt["model"])
     model.eval()
-    return model, ckpt["window"]
+    return model, ckpt["window"], emotions
 
 
-def export_onnx(model, window, out_path):
+def export_onnx(model, window, emotions, out_path):
     from dataset import FEAT_DIM
     dummy = torch.zeros(1, window, FEAT_DIM)
     torch.onnx.export(model.cpu(), dummy, out_path,
                       input_names=["keypoints"], output_names=["logits"],
                       dynamic_axes={"keypoints": {0: "batch"}})
-    print(f"exported ONNX -> {out_path} (usable in the web app via onnxruntime-web)")
+    meta_path = Path(out_path).with_suffix(".json")
+    meta_path.write_text(json.dumps({"emotions": emotions, "window": window}))
+    print(f"exported ONNX -> {out_path} (+ {meta_path.name} metadata)")
+    print("copy both into app/ and serve it (python -m http.server) — "
+          "index.html loads the model automatically")
 
 
 def main():
@@ -41,10 +52,10 @@ def main():
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model, window = load(args.ckpt, device)
+    model, window, emotions = load(args.ckpt, device)
 
     if args.export_onnx:
-        export_onnx(model, window, args.export_onnx)
+        export_onnx(model, window, emotions, args.export_onnx)
         return
 
     import mediapipe as mp
@@ -63,12 +74,12 @@ def main():
                             for lm in res.pose_landmarks.landmark], dtype=np.float32)
             buf.append(pts)
             if len(buf) == window:
-                feats = to_features(np.stack(buf))          # (window, FEAT_DIM)
+                feats = to_features(np.stack(buf))  # (window, FEAT_DIM)
                 x = torch.from_numpy(feats[None]).to(device)
                 with torch.no_grad():
                     probs = torch.softmax(model(x), dim=1)[0].cpu().numpy()
                 top = int(probs.argmax())
-                text = f"{EMOTIONS[top]} {probs[top]*100:.0f}%"
+                text = f"{emotions[top]} {probs[top]*100:.0f}%"
         cv2.putText(frame, text, (16, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 255, 120), 2)
         cv2.imshow("MotionEmotion", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):

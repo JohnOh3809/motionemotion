@@ -2,7 +2,17 @@
 
 Usage:
     python train.py --poses data/poses --labels data/labels \
-        [--model lstm|transformer] [--window 45] [--epochs 40] [--out checkpoints]
+        [--model lstm|transformer] [--window 45] [--epochs 40] [--out checkpoints] \
+        [--merge5] [--va-weight 0.3]
+
+--merge5     merge the two hardest-to-read-from-body classes into their nearest
+             neighbours (disgusted->angry, surprised->fearful) and train a
+             5-class model. Recommended when accuracy matters more than coverage.
+--va-weight  add an auxiliary valence/arousal regression head during training
+             (weight of its MSE loss, 0 = off). Body movement encodes arousal
+             far more reliably than discrete categories, so this auxiliary
+             signal regularizes the shared encoder. The head is training-only;
+             the saved checkpoint and ONNX export stay classification-only.
 """
 import argparse
 from pathlib import Path
@@ -14,6 +24,16 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from dataset import EMOTIONS, NUM_CLASSES, build_dataset
 from model import build_model
+
+# 7 -> 5 class merge: the pairs bodies genuinely confuse
+MERGE5 = {"disgusted": "angry", "surprised": "fearful"}
+
+# circumplex-model (valence, arousal) anchor per emotion, in [-1, 1]
+VA_ANCHORS = {
+    "happy": (0.8, 0.6), "sad": (-0.7, -0.5), "angry": (-0.6, 0.8),
+    "fearful": (-0.7, 0.7), "surprised": (0.3, 0.8), "disgusted": (-0.6, 0.3),
+    "neutral": (0.0, 0.0),
+}
 
 
 def main():
@@ -27,10 +47,24 @@ def main():
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--out", default="checkpoints")
+    ap.add_argument("--merge5", action="store_true",
+                    help="train 5 classes: disgusted->angry, surprised->fearful")
+    ap.add_argument("--va-weight", type=float, default=0.0,
+                    help="weight of auxiliary valence/arousal loss (0 = off)")
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     X, y = build_dataset(args.poses, args.labels, args.window, args.stride)
+
+    # optional 7 -> 5 class merge
+    if args.merge5:
+        classes = [e for e in EMOTIONS if e not in MERGE5]
+        remap = np.array([classes.index(MERGE5.get(e, e)) for e in EMOTIONS])
+        y = remap[y]
+        print(f"merged classes -> {classes}")
+    else:
+        classes = list(EMOTIONS)
+    n_classes = len(classes)
 
     # split
     rng = np.random.default_rng(42)
@@ -43,14 +77,26 @@ def main():
     va_dl = DataLoader(va, batch_size=args.batch)
 
     # class weights for imbalance (face labels are usually neutral-heavy)
-    counts = np.bincount(y[tr_idx], minlength=NUM_CLASSES).astype(np.float32)
-    weights = torch.tensor(counts.sum() / np.clip(counts, 1, None) / NUM_CLASSES,
+    counts = np.bincount(y[tr_idx], minlength=n_classes).astype(np.float32)
+    weights = torch.tensor(counts.sum() / np.clip(counts, 1, None) / n_classes,
                            dtype=torch.float32, device=device)
 
-    model = build_model(args.model).to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    model = build_model(args.model, num_classes=n_classes).to(device)
+
+    # optional auxiliary valence/arousal head on the shared pooled encoding
+    va_head, va_targets = None, None
+    params = list(model.parameters())
+    if args.va_weight > 0:
+        va_head = nn.Linear(model.pooled_dim, 2).to(device)
+        va_targets = torch.tensor([VA_ANCHORS[c] for c in classes],
+                                  dtype=torch.float32, device=device)
+        params += list(va_head.parameters())
+        print(f"auxiliary valence/arousal head on (weight {args.va_weight})")
+
+    opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.epochs)
     crit = nn.CrossEntropyLoss(weight=weights)
+    mse = nn.MSELoss()
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -62,7 +108,10 @@ def main():
         for xb, yb in tr_dl:
             xb, yb = xb.to(device), yb.to(device)
             opt.zero_grad()
-            loss = crit(model(xb), yb)
+            pooled = model.pooled(xb)
+            loss = crit(model.head(pooled), yb)
+            if va_head is not None:
+                loss = loss + args.va_weight * mse(va_head(pooled), va_targets[yb])
             loss.backward()
             opt.step()
             tr_loss += loss.item() * len(xb)
@@ -70,7 +119,7 @@ def main():
 
         model.eval()
         correct, total = 0, 0
-        conf = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=int)
+        conf = np.zeros((n_classes, n_classes), dtype=int)
         with torch.no_grad():
             for xb, yb in va_dl:
                 pred = model(xb.to(device)).argmax(1).cpu()
@@ -84,14 +133,14 @@ def main():
         if acc > best_acc:
             best_acc = acc
             torch.save({"model": model.state_dict(), "arch": args.model,
-                        "window": args.window, "emotions": EMOTIONS},
+                        "window": args.window, "emotions": classes},
                        out_dir / "best.pt")
 
     print(f"\nbest val acc: {best_acc:.3f} — saved to {out_dir/'best.pt'}")
     print("val confusion matrix (rows=true, cols=pred):")
-    print("        " + " ".join(f"{e[:6]:>6}" for e in EMOTIONS))
+    print("        " + " ".join(f"{e[:6]:>6}" for e in classes))
     for i, row in enumerate(conf):
-        print(f"{EMOTIONS[i][:7]:>7} " + " ".join(f"{v:6d}" for v in row))
+        print(f"{classes[i][:7]:>7} " + " ".join(f"{v:6d}" for v in row))
 
 
 if __name__ == "__main__":
