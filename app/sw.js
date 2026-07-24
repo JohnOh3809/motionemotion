@@ -1,6 +1,7 @@
-// MotionEmotion service worker — makes the app installable and work offline
-// after the first visit (pose model + wasm are cached on first use).
-const CACHE = "motionemotion-v1";
+// service worker — this is what makes the thing installable and lets it
+// work offline once you've opened it a couple times. the pose model + wasm
+// come off CDNs on first load and get cached like everything else.
+const CACHE = "motionemotion-v1"; // bump this when the shell changes
 const SHELL = ["./", "index.html", "record.html", "manifest.webmanifest",
                "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
 
@@ -9,6 +10,7 @@ self.addEventListener("install", (e) => {
 });
 
 self.addEventListener("activate", (e) => {
+  // clear caches from old versions
   e.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
@@ -16,9 +18,9 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-// Same-origin + CDN assets: cache-first with background refresh of the shell.
-// The .onnx model is fetched with cache "no-store" by the page, so a newly
-// trained model is always picked up.
+// cache-first, refresh in the background. one deliberate exception: the
+// .onnx model and its json are never cached here — the page fetches them
+// no-store so a freshly trained model always wins over a stale one.
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return;
@@ -35,7 +37,7 @@ self.addEventListener("fetch", (e) => {
       const fetched = fetch(e.request).then((res) => {
         if (res.ok) caches.open(CACHE).then((c) => c.put(e.request, res.clone())).catch(() => {});
         return res.clone();
-      }).catch(() => hit);
+      }).catch(() => hit); // offline? cached copy it is
       return hit || fetched;
     })
   );

@@ -176,7 +176,8 @@
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
-// installable app: register service worker when served over http(s)
+// register the service worker so this installs like a real app
+// (only works over http(s) — double-clicked file:// pages don't get one)
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
@@ -191,7 +192,7 @@ const EMOTIONS = [
   { name: "neutral",   emoji: "🙂", color: "#8b949e" },
 ];
 
-// MediaPipe pose landmark indices
+// mediapipe's landmark numbering (the ones we actually use)
 const L = {
   NOSE: 0, L_EYE: 2, R_EYE: 5, L_EAR: 7, R_EAR: 8,
   L_SHOULDER: 11, R_SHOULDER: 12, L_ELBOW: 13, R_ELBOW: 14,
@@ -230,7 +231,9 @@ for (const e of EMOTIONS) {
   barVals[e.name] = row.querySelector(".bar-val");
 }
 
-// ---------- learned model (ONNX), used automatically when present ----------
+// ===== the learned model (if there is one) =====
+// once you've trained something with the pipeline and exported it, drop
+// motionemotion.onnx (+ its .json) next to this file and it just gets used.
 let session = null, ort = null;
 let modelMeta = { emotions: EMOTIONS.map(e => e.name), window: 45 };
 let lastInferT = 0, modelProbs = null;
@@ -240,7 +243,7 @@ async function tryLoadModel() {
     const res = await fetch("motionemotion.onnx", { cache: "no-store" });
     if (!res.ok) throw new Error("not found");
     const buf = await res.arrayBuffer();
-    try { // optional metadata sidecar written by infer.py --export-onnx
+    try { // the .json sidecar tells us the class list (5 if trained w/ --merge5)
       const m = await fetch("motionemotion.json", { cache: "no-store" });
       if (m.ok) modelMeta = { ...modelMeta, ...(await m.json()) };
     } catch {}
@@ -257,8 +260,10 @@ async function tryLoadModel() {
 }
 tryLoadModel();
 
-// Mirrors pipeline/dataset.py to_features(): per-frame hip-centered, torso-scaled
-// xy + frame-to-frame velocity → (window, 132), flattened [x,y,vx,vy] per joint.
+// this MUST stay in sync with to_features() in pipeline/dataset.py:
+// center on hips, scale by torso, xy + per-frame velocity, [x,y,vx,vy] per
+// joint = 132 numbers a frame. if they drift apart the model still runs,
+// it just predicts nonsense. (there's a parity test in the repo history.)
 function toModelFeatures(frames) {
   const T = frames.length, F = 132;
   const xy = frames.map(pts => {
@@ -297,11 +302,13 @@ async function runModel(rawBuf, t) {
   modelProbs = p;
 }
 
-// ---------- rolling buffer of poses ----------
+// ===== rolling pose buffers =====
+// two buffers because the two brains want different things: the heuristics
+// look at ~2s of derived motion, the model wants 45 raw frames.
 const WINDOW_MS = 2000;
-const buffer = [];      // { t, pts } — heuristic feature window (~2 s)
-const rawBuf = [];      // raw landmark frames for the learned model
-const RAW_MAX = 90;
+const buffer = [];      // { t, pts } for the heuristics
+const rawBuf = [];      // plain landmark frames for the model
+const RAW_MAX = 90;     // keep a little extra, slicing is cheap
 
 function pushPose(t, pts) {
   buffer.push({ t, pts });
@@ -313,7 +320,9 @@ function pushPose(t, pts) {
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
-// ---------- feature extraction over the window ----------
+// ===== hand-made motion features =====
+// these are the things a human would actually describe: how much you're
+// moving, how sharply, whether your arms are open, head hanging, etc.
 function computeFeatures() {
   if (buffer.length < 6) return null;
   const latest = buffer[buffer.length - 1].pts;
@@ -370,9 +379,11 @@ function computeFeatures() {
   return { energy, jerkiness, peak, armSpread, handsUp, headDrop, slouch, contraction, handsToFace, rise, tremble };
 }
 
-// ---------- personal calibration ----------
-// Everyone's "neutral" differs (posture, resting energy, tremor). A 3-second
-// capture re-centers the features the heuristics are most sensitive to.
+// ===== calibration =====
+// nobody's "neutral" looks the same — some people fidget standing still,
+// some naturally slouch. 3 seconds of you doing nothing gives us a baseline
+// to subtract, so the classifier reacts to CHANGE from your normal instead
+// of judging your posture. matters a lot for who this app is for.
 const CAL_REF = { energy: 0.20, headDrop: 0.70, armSpread: 1.50, tremble: 0.30, contraction: 0.30, handsUp: -0.80 };
 let calib = null;       // averaged personal baseline
 let calSamples = null;  // collecting when non-null
@@ -412,8 +423,10 @@ function startCalibration() {
 }
 calBtn.addEventListener("click", startCalibration);
 
-// ---------- heuristic scoring ----------
-// Each emotion gets a linear score over features; softmax → probabilities.
+// ===== the starter brain =====
+// hand-tuned scores -> softmax. every weight here came from me acting out
+// emotions at my webcam and nudging numbers, so, you know. it's a baseline.
+// train the real model and this whole block gets bypassed.
 const sig = (x) => 1 / (1 + Math.exp(-x));
 function scoreEmotions(f) {
   const s = {};
@@ -435,7 +448,7 @@ function scoreEmotions(f) {
   return p;
 }
 
-// exponential smoothing of probabilities
+// smooth the probabilities so the bars don't have a seizure
 let smoothed = null;
 function smooth(p, alpha = 0.12) {
   if (!smoothed) { smoothed = { ...p }; return smoothed; }
@@ -443,7 +456,7 @@ function smooth(p, alpha = 0.12) {
   return smoothed;
 }
 
-// ---------- rendering ----------
+// ===== drawing =====
 function drawSkeleton(pts) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.strokeStyle = "rgba(76,154,255,0.85)";
@@ -464,7 +477,8 @@ function drawSkeleton(pts) {
   }
 }
 
-// "Not sure" instead of a false-confident answer (assistive principle)
+// the one rule i care about most: if the numbers are mushy, SAY SO.
+// an assistive app that confidently guesses wrong speaks over the person.
 const MIN_TOP = 0.34, MIN_MARGIN = 0.07;
 
 function render(p, f) {
@@ -494,7 +508,7 @@ function render(p, f) {
     (calib ? `<br><span class="cal-tag">calibrated ✓</span>` : "");
 }
 
-// ---------- main loop ----------
+// ===== main loop =====
 let landmarker = null, running = false, lastVideoTime = -1;
 
 async function init() {
