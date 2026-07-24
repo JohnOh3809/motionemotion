@@ -3,82 +3,183 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MotionEmotion — Emotion from Body Movement</title>
+<meta name="theme-color" content="#0b0d10">
+<title>MotionEmotion</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0d1117; --panel: #161b22; --border: #30363d;
-    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --bg: #0b0d10; --panel: #12151a; --border: #242a31; --border-soft: #1b2026;
+    --text: #e8eaed; --muted: #8f98a3; --accent: #4c9aff; --good: #3fb950;
+    --radius: 14px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { color-scheme: dark; }
   body {
     background: var(--bg); color: var(--text);
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-family: "Inter", -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px; line-height: 1.5;
     min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-    padding: 20px;
+    padding: 0 20px 28px;
   }
-  h1 { font-size: 1.6rem; margin-bottom: 4px; }
-  h1 span { color: var(--accent); }
-  .subtitle { color: var(--muted); margin-bottom: 16px; font-size: .9rem; }
-  .layout { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; max-width: 1200px; }
-  .video-wrap { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-  video { display: block; width: 640px; max-width: 90vw; transform: scaleX(-1); }
+
+  header {
+    width: 100%; max-width: 1060px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 2px 22px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 1.05rem; letter-spacing: -0.01em; }
+  .brand svg { display: block; }
+  .brand .dim { color: var(--muted); font-weight: 400; }
+  .mode {
+    font-size: .78rem; color: var(--muted);
+    display: flex; align-items: center; gap: 7px;
+    border: 1px solid var(--border-soft); border-radius: 999px; padding: 5px 12px;
+    background: var(--panel);
+  }
+  .mode .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+  .mode.model { color: var(--good); }
+  .mode.model .dot { background: var(--good); }
+
+  main { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; max-width: 1060px; width: 100%; }
+
+  .stage { display: flex; flex-direction: column; min-width: 0; }
+  .video-wrap {
+    position: relative; background: var(--panel);
+    border: 1px solid var(--border-soft); border-radius: var(--radius); overflow: hidden;
+  }
+  video { display: block; width: 640px; max-width: calc(100vw - 40px); transform: scaleX(-1); }
   canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); pointer-events: none; }
-  .big-emotion {
-    position: absolute; top: 12px; left: 12px; background: rgba(13,17,23,.75);
-    border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px;
-    font-size: 1.3rem; font-weight: 600; backdrop-filter: blur(4px);
+  .placeholder {
+    position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px;
+    align-items: center; justify-content: center; color: var(--muted); font-size: .9rem;
   }
-  .big-emotion .emoji { font-size: 1.6rem; margin-right: 8px; }
-  .panel {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    padding: 16px; width: 320px; max-width: 90vw;
+  .placeholder svg { opacity: .5; }
+
+  .readout {
+    position: absolute; top: 14px; left: 14px; display: none;
+    align-items: center; gap: 9px;
+    background: rgba(11,13,16,.72); border: 1px solid var(--border);
+    border-radius: 12px; padding: 9px 16px; backdrop-filter: blur(8px);
+    font-size: 1.1rem; font-weight: 600; letter-spacing: -0.01em;
   }
-  .panel h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 12px; }
-  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .bar-label { width: 92px; font-size: .85rem; }
-  .bar-track { flex: 1; height: 14px; background: #21262d; border-radius: 7px; overflow: hidden; }
-  .bar-fill { height: 100%; border-radius: 7px; width: 0%; transition: width .25s ease; }
-  .bar-val { width: 38px; font-size: .75rem; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
-  .features { margin-top: 18px; font-size: .8rem; color: var(--muted); line-height: 1.7; }
-  .features b { color: var(--text); font-weight: 500; }
-  #status { margin-top: 14px; color: var(--muted); font-size: .85rem; }
+  .readout .emoji { font-size: 1.35rem; }
+  .readout.uncertain { font-weight: 400; font-size: .95rem; color: var(--muted); }
+
+  .cal-overlay {
+    position: absolute; inset: 0; display: none; flex-direction: column; gap: 6px;
+    align-items: center; justify-content: center;
+    background: rgba(11,13,16,.66); backdrop-filter: blur(3px);
+    font-size: 1.15rem; font-weight: 500; text-align: center;
+  }
+  .cal-overlay .count { font-size: 2.2rem; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+  .controls { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
   button {
-    background: var(--accent); color: #0d1117; border: none; border-radius: 8px;
-    padding: 10px 22px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 14px;
+    font: inherit; font-weight: 500; cursor: pointer;
+    border-radius: 10px; padding: 9px 20px; border: 1px solid transparent;
+    transition: background .15s ease, border-color .15s ease, opacity .15s ease;
   }
-  button:disabled { opacity: .5; cursor: default; }
-  footer { margin-top: 18px; color: var(--muted); font-size: .75rem; max-width: 640px; text-align: center; }
+  .btn-primary { background: var(--accent); color: #08101c; }
+  .btn-primary:hover:not(:disabled) { background: #63a9ff; }
+  .btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .45; cursor: default; }
+  #status { margin-top: 12px; color: var(--muted); font-size: .84rem; min-height: 1.3em; }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--radius);
+    padding: 20px; width: 320px; max-width: calc(100vw - 40px);
+    align-self: flex-start;
+  }
+  .panel h2 {
+    font-size: .72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .09em; color: var(--muted); margin-bottom: 14px;
+  }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .bar-label { width: 96px; font-size: .86rem; color: var(--text); white-space: nowrap; }
+  .bar-label .e { margin-right: 6px; }
+  .bar-track { flex: 1; height: 8px; background: #1c2127; border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; width: 0%; transition: width .25s ease; }
+  .bar-val { width: 38px; font-size: .74rem; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+
+  details { margin-top: 16px; border-top: 1px solid var(--border-soft); padding-top: 12px; }
+  summary {
+    font-size: .78rem; color: var(--muted); cursor: pointer; user-select: none;
+    list-style: none; display: flex; align-items: center; gap: 6px;
+  }
+  summary::before { content: "▸"; font-size: .7rem; transition: transform .15s ease; }
+  details[open] summary::before { transform: rotate(90deg); }
+  .features { margin-top: 10px; font-size: .78rem; color: var(--muted); line-height: 1.8; }
+  .features b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .cal-tag { color: var(--good); }
+
+  footer { margin-top: 26px; color: #5d6670; font-size: .74rem; max-width: 620px; text-align: center; }
+  footer a { color: inherit; }
 </style>
 </head>
 <body>
-  <h1>Motion<span>Emotion</span></h1>
-  <div class="subtitle">Expressing emotion through body movement — no facial expressions needed</div>
-
-  <div class="layout">
-    <div class="video-wrap">
-      <video id="video" autoplay playsinline muted></video>
-      <canvas id="overlay"></canvas>
-      <div class="big-emotion" id="bigEmotion" style="display:none"><span class="emoji">🙂</span><span class="name">neutral</span></div>
+  <header>
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="7" cy="7" r="3.2" fill="#4c9aff"/>
+        <path d="M4 20c2.5-4.5 7-7 12-7" stroke="#4c9aff" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M13 20c1.6-2.4 4-4 7-4.4" stroke="#2c5f9e" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+      Motion<span class="dim">Emotion</span>
     </div>
-    <div class="panel">
+    <div class="mode" id="modeBadge"><span class="dot"></span><span id="modeText">checking for trained model…</span></div>
+  </header>
+
+  <main>
+    <div class="stage">
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="placeholder" id="placeholder">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+          </svg>
+          Camera is off
+        </div>
+        <div class="readout" id="bigEmotion"><span class="emoji">🙂</span><span class="name">neutral</span></div>
+        <div class="cal-overlay" id="calOverlay">Stand still &amp; relaxed<div class="count" id="calCount">3</div></div>
+      </div>
+      <div class="controls">
+        <button id="startBtn" class="btn-primary">Start camera</button>
+        <button id="calBtn" class="btn-ghost" disabled title="Capture your relaxed neutral posture so the classifier adapts to you">Calibrate neutral</button>
+      </div>
+      <div id="status">Everything runs locally in your browser — nothing is uploaded.</div>
+    </div>
+
+    <aside class="panel">
       <h2>Emotion probabilities</h2>
       <div id="bars"></div>
-      <h2 style="margin-top:18px">Motion features</h2>
-      <div class="features" id="features">waiting for pose…</div>
-    </div>
-  </div>
-
-  <button id="startBtn">Start camera</button>
-  <div id="status">Click “Start camera” to begin.</div>
+      <details>
+        <summary>Motion features</summary>
+        <div class="features" id="features">waiting for pose…</div>
+      </details>
+    </aside>
+  </main>
 
   <footer>
-    All processing happens locally in your browser. The starter classifier uses interpretable
-    motion heuristics (energy, posture openness, jerkiness, expansion…). Swap it for a trained
-    model from the included training pipeline for better accuracy.
+    If a trained model (<code>motionemotion.onnx</code> from the pipeline) sits next to this file on a
+    served page, it's used automatically; otherwise an interpretable heuristic classifier runs.
+    When unsure, it says “not sure” rather than guessing — the app should never speak for you
+    with false confidence.
   </footer>
 
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+// installable app: register service worker when served over http(s)
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
 
 const EMOTIONS = [
   { name: "happy",     emoji: "😄", color: "#3fb950" },
@@ -109,13 +210,19 @@ const statusEl = document.getElementById("status");
 const bigEmotion = document.getElementById("bigEmotion");
 const barsEl = document.getElementById("bars");
 const featuresEl = document.getElementById("features");
+const modeBadge = document.getElementById("modeBadge");
+const modeText = document.getElementById("modeText");
+const calBtn = document.getElementById("calBtn");
+const calOverlay = document.getElementById("calOverlay");
+const calCount = document.getElementById("calCount");
+const placeholder = document.getElementById("placeholder");
 
 // build bars
 const barFills = {}, barVals = {};
 for (const e of EMOTIONS) {
   const row = document.createElement("div");
   row.className = "bar-row";
-  row.innerHTML = `<div class="bar-label">${e.emoji} ${e.name}</div>
+  row.innerHTML = `<div class="bar-label"><span class="e">${e.emoji}</span>${e.name}</div>
     <div class="bar-track"><div class="bar-fill" style="background:${e.color}"></div></div>
     <div class="bar-val">0%</div>`;
   barsEl.appendChild(row);
@@ -123,13 +230,84 @@ for (const e of EMOTIONS) {
   barVals[e.name] = row.querySelector(".bar-val");
 }
 
+// ---------- learned model (ONNX), used automatically when present ----------
+let session = null, ort = null;
+let modelMeta = { emotions: EMOTIONS.map(e => e.name), window: 45 };
+let lastInferT = 0, modelProbs = null;
+
+async function tryLoadModel() {
+  try {
+    const res = await fetch("motionemotion.onnx", { cache: "no-store" });
+    if (!res.ok) throw new Error("not found");
+    const buf = await res.arrayBuffer();
+    try { // optional metadata sidecar written by infer.py --export-onnx
+      const m = await fetch("motionemotion.json", { cache: "no-store" });
+      if (m.ok) modelMeta = { ...modelMeta, ...(await m.json()) };
+    } catch {}
+    ort = await import("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.mjs");
+    session = await ort.InferenceSession.create(buf, { executionProviders: ["wasm"] });
+    modeText.textContent = "learned model";
+    modeBadge.classList.add("model");
+    modeBadge.title = "Using motionemotion.onnx";
+  } catch {
+    session = null;
+    modeText.textContent = "heuristic classifier";
+    modeBadge.title = "No trained model found — using interpretable motion heuristics";
+  }
+}
+tryLoadModel();
+
+// Mirrors pipeline/dataset.py to_features(): per-frame hip-centered, torso-scaled
+// xy + frame-to-frame velocity → (window, 132), flattened [x,y,vx,vy] per joint.
+function toModelFeatures(frames) {
+  const T = frames.length, F = 132;
+  const xy = frames.map(pts => {
+    const hx = (pts[L.L_HIP].x + pts[L.R_HIP].x) / 2, hy = (pts[L.L_HIP].y + pts[L.R_HIP].y) / 2;
+    const sx = (pts[L.L_SHOULDER].x + pts[L.R_SHOULDER].x) / 2, sy = (pts[L.L_SHOULDER].y + pts[L.R_SHOULDER].y) / 2;
+    const torso = Math.max(Math.hypot(sx - hx, sy - hy), 1e-4);
+    const out = new Float32Array(66);
+    for (let j = 0; j < 33; j++) { out[j*2] = (pts[j].x - hx) / torso; out[j*2+1] = (pts[j].y - hy) / torso; }
+    return out;
+  });
+  const feats = new Float32Array(T * F);
+  for (let t = 0; t < T; t++)
+    for (let j = 0; j < 33; j++) {
+      const o = t * F + j * 4;
+      feats[o]   = xy[t][j*2];
+      feats[o+1] = xy[t][j*2+1];
+      feats[o+2] = t === 0 ? 0 : xy[t][j*2]   - xy[t-1][j*2];
+      feats[o+3] = t === 0 ? 0 : xy[t][j*2+1] - xy[t-1][j*2+1];
+    }
+  return feats;
+}
+
+async function runModel(rawBuf, t) {
+  if (!session || rawBuf.length < modelMeta.window || t - lastInferT < 150) return;
+  lastInferT = t;
+  const frames = rawBuf.slice(-modelMeta.window);
+  const input = new ort.Tensor("float32", toModelFeatures(frames), [1, modelMeta.window, 132]);
+  const out = await session.run({ [session.inputNames[0]]: input });
+  const logits = out[session.outputNames[0]].data;
+  const mx = Math.max(...logits);
+  const exps = Array.from(logits, v => Math.exp(v - mx));
+  const Z = exps.reduce((a, b) => a + b, 0);
+  const p = {};
+  for (const e of EMOTIONS) p[e.name] = 0;
+  modelMeta.emotions.forEach((name, i) => { if (name in p) p[name] = exps[i] / Z; });
+  modelProbs = p;
+}
+
 // ---------- rolling buffer of poses ----------
 const WINDOW_MS = 2000;
-const buffer = []; // { t, pts: [{x,y,visibility}...] }
+const buffer = [];      // { t, pts } — heuristic feature window (~2 s)
+const rawBuf = [];      // raw landmark frames for the learned model
+const RAW_MAX = 90;
 
 function pushPose(t, pts) {
   buffer.push({ t, pts });
   while (buffer.length && t - buffer[0].t > WINDOW_MS) buffer.shift();
+  rawBuf.push(pts);
+  while (rawBuf.length > RAW_MAX) rawBuf.shift();
 }
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -156,9 +334,9 @@ function computeFeatures() {
     prevSpeed = s;
   }
   const mean = (a) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
-  const energy = mean(speeds);                       // overall movement
-  const jerkiness = mean(accels);                    // sharp starts/stops
-  const peak = Math.max(...speeds, 0);               // burst detection
+  const energy = mean(speeds);            // overall movement
+  const jerkiness = mean(accels);         // sharp starts/stops
+  const peak = Math.max(...speeds, 0);    // burst detection
 
   // posture (from latest frame)
   const sh = mid(latest[L.L_SHOULDER], latest[L.R_SHOULDER]);
@@ -167,14 +345,14 @@ function computeFeatures() {
 
   const armSpread = norm(dist(latest[L.L_WRIST], latest[L.R_WRIST]));      // openness
   const handsUp = ((sh.y - latest[L.L_WRIST].y) + (sh.y - latest[L.R_WRIST].y)) / 2 / shoulderW; // + = above shoulders
-  const headDrop = (nose.y - sh.y) / shoulderW;      // larger = head hanging low
-  const slouch = Math.abs(sh.x - hp.x) / shoulderW;  // lateral lean
+  const headDrop = (nose.y - sh.y) / shoulderW;                            // larger = head hanging low
+  const slouch = Math.abs(sh.x - hp.x) / shoulderW;                        // lateral lean
   const contraction = 1 / (1 + norm(
     dist(latest[L.L_WRIST], hp) + dist(latest[L.R_WRIST], hp)
-  ));                                                // limbs pulled toward body
+  ));                                                                      // limbs pulled toward body
   const handsToFace = 1 / (1 + norm(
     Math.min(dist(latest[L.L_WRIST], nose), dist(latest[L.R_WRIST], nose)) * 2
-  ));                                                // hands near face/chest
+  ));                                                                      // hands near face/chest
 
   // vertical expansion over window (rising = positive)
   const oldSh = mid(buffer[0].pts[L.L_SHOULDER], buffer[0].pts[L.R_SHOULDER]);
@@ -191,6 +369,48 @@ function computeFeatures() {
 
   return { energy, jerkiness, peak, armSpread, handsUp, headDrop, slouch, contraction, handsToFace, rise, tremble };
 }
+
+// ---------- personal calibration ----------
+// Everyone's "neutral" differs (posture, resting energy, tremor). A 3-second
+// capture re-centers the features the heuristics are most sensitive to.
+const CAL_REF = { energy: 0.20, headDrop: 0.70, armSpread: 1.50, tremble: 0.30, contraction: 0.30, handsUp: -0.80 };
+let calib = null;       // averaged personal baseline
+let calSamples = null;  // collecting when non-null
+
+function applyCalib(f) {
+  if (!calib) return f;
+  const g = { ...f };
+  for (const k of Object.keys(CAL_REF)) g[k] = f[k] - calib[k] + CAL_REF[k];
+  return g;
+}
+
+function startCalibration() {
+  calSamples = [];
+  calBtn.disabled = true;
+  calOverlay.style.display = "flex";
+  let remaining = 3;
+  calCount.textContent = remaining;
+  const timer = setInterval(() => {
+    remaining--;
+    if (remaining > 0) { calCount.textContent = remaining; return; }
+    clearInterval(timer);
+    calOverlay.style.display = "none";
+    calBtn.disabled = false;
+    if (calSamples.length < 10) {
+      statusEl.textContent = "Calibration failed — no pose detected. Try again facing the camera.";
+      calSamples = null;
+      return;
+    }
+    calib = {};
+    for (const k of Object.keys(CAL_REF))
+      calib[k] = calSamples.reduce((a, s) => a + s[k], 0) / calSamples.length;
+    calSamples = null;
+    smoothed = null; // reset smoothing so the change shows immediately
+    statusEl.textContent = "Calibrated to your neutral — features now measure change relative to you.";
+    calBtn.textContent = "Recalibrate";
+  }, 1000);
+}
+calBtn.addEventListener("click", startCalibration);
 
 // ---------- heuristic scoring ----------
 // Each emotion gets a linear score over features; softmax → probabilities.
@@ -226,7 +446,7 @@ function smooth(p, alpha = 0.12) {
 // ---------- rendering ----------
 function drawSkeleton(pts) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = "rgba(88,166,255,0.9)";
+  ctx.strokeStyle = "rgba(76,154,255,0.85)";
   ctx.lineWidth = 3;
   for (const [a, b] of CONNECTIONS) {
     if ((pts[a].visibility ?? 1) < 0.4 || (pts[b].visibility ?? 1) < 0.4) continue;
@@ -239,26 +459,39 @@ function drawSkeleton(pts) {
   for (const j of Object.values(L)) {
     if ((pts[j].visibility ?? 1) < 0.4) continue;
     ctx.beginPath();
-    ctx.arc(pts[j].x * canvas.width, pts[j].y * canvas.height, 5, 0, 2 * Math.PI);
+    ctx.arc(pts[j].x * canvas.width, pts[j].y * canvas.height, 4.5, 0, 2 * Math.PI);
     ctx.fill();
   }
 }
 
+// "Not sure" instead of a false-confident answer (assistive principle)
+const MIN_TOP = 0.34, MIN_MARGIN = 0.07;
+
 function render(p, f) {
-  let top = EMOTIONS[6];
+  let top = EMOTIONS[6], second = null;
   for (const e of EMOTIONS) {
     const v = p[e.name];
     barFills[e.name].style.width = (v * 100).toFixed(1) + "%";
     barVals[e.name].textContent = (v * 100).toFixed(0) + "%";
-    if (v > p[top.name]) top = e;
+    if (v > p[top.name]) { second = top; top = e; }
+    else if (!second || v > p[second.name]) { if (e !== top) second = e; }
   }
-  bigEmotion.style.display = "block";
-  bigEmotion.querySelector(".emoji").textContent = top.emoji;
-  bigEmotion.querySelector(".name").textContent = top.name;
+  bigEmotion.style.display = "flex";
+  const margin = second ? p[top.name] - p[second.name] : 1;
+  if (p[top.name] < MIN_TOP || margin < MIN_MARGIN) {
+    bigEmotion.classList.add("uncertain");
+    bigEmotion.querySelector(".emoji").textContent = "🤔";
+    bigEmotion.querySelector(".name").textContent = `not sure — leaning ${top.name}`;
+  } else {
+    bigEmotion.classList.remove("uncertain");
+    bigEmotion.querySelector(".emoji").textContent = top.emoji;
+    bigEmotion.querySelector(".name").textContent = top.name;
+  }
   featuresEl.innerHTML =
     `energy <b>${f.energy.toFixed(2)}</b> · jerkiness <b>${f.jerkiness.toFixed(1)}</b> · burst <b>${f.peak.toFixed(2)}</b><br>` +
     `openness <b>${f.armSpread.toFixed(2)}</b> · hands-up <b>${f.handsUp.toFixed(2)}</b> · head-drop <b>${f.headDrop.toFixed(2)}</b><br>` +
-    `contraction <b>${(f.contraction*2).toFixed(2)}</b> · tremble <b>${f.tremble.toFixed(2)}</b> · rise <b>${f.rise.toFixed(2)}</b>`;
+    `contraction <b>${(f.contraction*2).toFixed(2)}</b> · tremble <b>${f.tremble.toFixed(2)}</b> · rise <b>${f.rise.toFixed(2)}</b>` +
+    (calib ? `<br><span class="cal-tag">calibrated ✓</span>` : "");
 }
 
 // ---------- main loop ----------
@@ -290,7 +523,9 @@ async function start() {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     running = true;
-    statusEl.textContent = "Running — move your body to express an emotion!";
+    placeholder.style.display = "none";
+    calBtn.disabled = false;
+    statusEl.textContent = "Move your body to express an emotion — calibrate your neutral first for best results.";
     requestAnimationFrame(loop);
   } catch (err) {
     statusEl.textContent = "Error: " + err.message;
@@ -309,7 +544,15 @@ function loop() {
       pushPose(t, pts);
       drawSkeleton(pts);
       const f = computeFeatures();
-      if (f) render(smooth(scoreEmotions(f)), f);
+      if (f) {
+        if (calSamples) calSamples.push(f);
+        if (session) {
+          runModel(rawBuf, t);
+          if (modelProbs) render(smooth(modelProbs), f);
+        } else {
+          render(smooth(scoreEmotions(applyCalib(f))), f);
+        }
+      }
     } else {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
