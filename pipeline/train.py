@@ -1,18 +1,18 @@
 """Train the emotion-from-motion model.
 
-Usage:
-    python train.py --poses data/poses --labels data/labels \
-        [--model lstm|transformer] [--window 45] [--epochs 40] [--out checkpoints] \
-        [--merge5] [--va-weight 0.3]
+Basic run:
+    python train.py --poses data/poses --labels data/labels
 
---merge5     merge the two hardest-to-read-from-body classes into their nearest
-             neighbours (disgusted->angry, surprised->fearful) and train a
-             5-class model. Recommended when accuracy matters more than coverage.
---va-weight  add an auxiliary valence/arousal regression head during training
-             (weight of its MSE loss, 0 = off). Body movement encodes arousal
-             far more reliably than discrete categories, so this auxiliary
-             signal regularizes the shared encoder. The head is training-only;
-             the saved checkpoint and ONNX export stay classification-only.
+Flags worth knowing:
+  --merge5        7 classes is ambitious for body-only signals. This folds the
+                  two hopeless ones into their nearest neighbors (disgusted->angry,
+                  surprised->fearful) and trains 5 instead. Use this if you care
+                  about accuracy more than coverage.
+  --va-weight 0.3 adds a little valence/arousal regression head during training.
+                  bodies broadcast arousal way better than they broadcast
+                  "disgust vs anger", so giving the encoder that side-task helps.
+                  training-only — the saved model / ONNX export look identical.
+  --model transformer   if you're feeling fancy (needs more data than i have)
 """
 import argparse
 from pathlib import Path
@@ -25,10 +25,12 @@ from torch.utils.data import DataLoader, TensorDataset
 from dataset import EMOTIONS, NUM_CLASSES, build_dataset
 from model import build_model
 
-# 7 -> 5 class merge: the pairs bodies genuinely confuse
+# the pairs bodies genuinely can't tell apart (see the confusion matrix if
+# you don't believe me)
 MERGE5 = {"disgusted": "angry", "surprised": "fearful"}
 
-# circumplex-model (valence, arousal) anchor per emotion, in [-1, 1]
+# rough (valence, arousal) anchor per emotion, circumplex-style, in [-1, 1].
+# these don't need to be precise — they just need the geometry to be sane.
 VA_ANCHORS = {
     "happy": (0.8, 0.6), "sad": (-0.7, -0.5), "angry": (-0.6, 0.8),
     "fearful": (-0.7, 0.7), "surprised": (0.3, 0.8), "disgusted": (-0.6, 0.3),
@@ -56,7 +58,6 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     X, y = build_dataset(args.poses, args.labels, args.window, args.stride)
 
-    # optional 7 -> 5 class merge
     if args.merge5:
         classes = [e for e in EMOTIONS if e not in MERGE5]
         remap = np.array([classes.index(MERGE5.get(e, e)) for e in EMOTIONS])
@@ -66,7 +67,7 @@ def main():
         classes = list(EMOTIONS)
     n_classes = len(classes)
 
-    # split
+    # 85/15 split, fixed seed so runs are comparable
     rng = np.random.default_rng(42)
     idx = rng.permutation(len(X))
     n_val = max(1, int(0.15 * len(X)))
@@ -76,14 +77,15 @@ def main():
     tr_dl = DataLoader(tr, batch_size=args.batch, shuffle=True)
     va_dl = DataLoader(va, batch_size=args.batch)
 
-    # class weights for imbalance (face labels are usually neutral-heavy)
+    # face-labeled data ends up ~80% neutral (people mostly just... stand there),
+    # so weight the loss or the model learns to answer "neutral" forever
     counts = np.bincount(y[tr_idx], minlength=n_classes).astype(np.float32)
     weights = torch.tensor(counts.sum() / np.clip(counts, 1, None) / n_classes,
                            dtype=torch.float32, device=device)
 
     model = build_model(args.model, num_classes=n_classes).to(device)
 
-    # optional auxiliary valence/arousal head on the shared pooled encoding
+    # optional valence/arousal side-head, bolted onto the shared encoding
     va_head, va_targets = None, None
     params = list(model.parameters())
     if args.va_weight > 0:
@@ -132,6 +134,7 @@ def main():
 
         if acc > best_acc:
             best_acc = acc
+            # save the class list too — infer.py and the app read it from here
             torch.save({"model": model.state_dict(), "arch": args.model,
                         "window": args.window, "emotions": classes},
                        out_dir / "best.pt")

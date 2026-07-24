@@ -1,12 +1,14 @@
-"""Extract body keypoints from videos using MediaPipe Pose.
+"""Videos in, keypoints out.
 
-Usage:
     python extract_poses.py --videos data/videos --out data/poses
 
-For each video, saves <name>.npz with:
-    keypoints: (T, 33, 4) float32 — x, y, z, visibility (normalized coords)
-    timestamps: (T,) float32 — seconds
+Each video becomes <name>.npz:
+    keypoints:  (T, 33, 4) — x, y, z, visibility per mediapipe joint
+    timestamps: (T,) seconds
     fps: float
+
+Frames where mediapipe can't find a person become NaN rows — dataset.py
+deals with those later, don't filter them here.
 """
 import argparse
 from pathlib import Path
@@ -20,11 +22,11 @@ VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 def extract(video_path: Path, out_dir: Path) -> None:
     pose = mp.solutions.pose.Pose(
-        static_image_mode=False, model_complexity=1,
+        static_image_mode=False, model_complexity=1,  # 1 = decent + not slow
         min_detection_confidence=0.5, min_tracking_confidence=0.5,
     )
     cap = cv2.VideoCapture(str(video_path))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0  # webm files sometimes report 0, sigh
 
     keypoints, timestamps = [], []
     frame_idx = 0
@@ -39,7 +41,7 @@ def extract(video_path: Path, out_dir: Path) -> None:
                 dtype=np.float32,
             )
         else:
-            pts = np.full((33, 4), np.nan, dtype=np.float32)  # no person detected
+            pts = np.full((33, 4), np.nan, dtype=np.float32)  # nobody in frame
         keypoints.append(pts)
         timestamps.append(frame_idx / fps)
         frame_idx += 1

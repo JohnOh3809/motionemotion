@@ -1,18 +1,17 @@
-"""Label acted clips by their folder/filename — no face model needed.
+"""Label acted clips from their filenames. No face model, no waiting.
 
-When you record clips where you KNOW the emotion (you acted it), the label is
-free. Organize clips either way:
+If you KNOW the emotion because you acted it, the label is free. Two layouts
+both work:
 
-  A) subfolders:   data/videos/happy/clip1.mp4, data/videos/sad/clip2.mp4, ...
-  B) filename prefix:  data/videos/happy_01.webm, data/videos/sad_02.webm, ...
+  A) subfolders:       clips/happy/take1.mp4, clips/sad/take2.mp4, ...
+  B) filename prefix:  clips/happy_01.webm, clips/sad_02.webm, ...
 
-The record.html helper produces option (B) automatically.
+record.html spits out option (B) automatically, so that's the usual path.
 
-This script flattens the clips into <out>/videos/ and writes matching
-<out>/labels/<name>_labels.npz (same format as auto_label.py), labeling every
-frame of each clip with its acted emotion.
+This flattens everything into <out>/videos/ and writes <out>/labels/ in the
+same format auto_label.py uses, labeling every frame with the acted emotion.
 
-    python acted_label.py --videos data/videos --out data_acted
+    python acted_label.py --videos clips --out data_acted
     python extract_poses.py --videos data_acted/videos --out data_acted/poses
     python train.py --poses data_acted/poses --labels data_acted/labels
 """
@@ -25,14 +24,14 @@ import numpy as np
 
 EMOTIONS = ["happy", "sad", "angry", "fearful", "surprised", "disgusted", "neutral"]
 EMO_INDEX = {e: i for i, e in enumerate(EMOTIONS)}
-# accept a few natural spellings
+# people name folders all kinds of ways, accept the obvious ones
 ALIASES = {"fear": "fearful", "scared": "fearful", "surprise": "surprised",
            "disgust": "disgusted", "mad": "angry", "calm": "neutral"}
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 
 def emotion_of(path: Path, root: Path):
-    # subfolder name takes priority, else filename prefix before first _ or -
+    # subfolder name wins; otherwise whatever comes before the first _ or -
     rel = path.relative_to(root)
     if len(rel.parts) > 1:
         cand = rel.parts[0].lower()
@@ -52,7 +51,7 @@ def frame_count(path: Path) -> int:
             return n
     except Exception:
         pass
-    return 300
+    return 300  # ~10s guess if cv2 can't tell us; close enough for labels
 
 
 def main():
@@ -83,6 +82,7 @@ def main():
         if not dst.exists():
             (shutil.copy2 if args.copy else lambda s, d: os.symlink(Path(s).resolve(), d))(clip, dst)
 
+        # every 5th frame gets a label row, conf 1.0 — we acted it, we're sure
         n = frame_count(clip)
         idx = np.arange(0, n, 5, dtype=np.int32)
         np.savez_compressed(

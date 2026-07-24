@@ -1,16 +1,18 @@
-"""Auto-label videos with emotions using a face expression model (DeepFace).
+"""Let a face model do the labeling for us (the whole idea of this project).
 
-This implements the cross-modal supervision idea: when the face IS visible,
-use it as a free labeler so the pose model can learn to predict the same
-emotion from body movement alone.
+Record people moving with their face visible. DeepFace reads the face and
+labels each moment; later the pose model learns to predict the same emotion
+from the body alone. Face = teacher, body = student.
 
-Usage:
     python auto_label.py --videos data/videos --out data/labels [--every 5] [--min-conf 0.55]
 
-For each video, saves <name>_labels.npz with:
-    frame_idx: (N,) int32   — frames that were analyzed
-    label:     (N,) int32   — index into EMOTIONS (-1 if no confident face)
-    conf:      (N,) float32 — dominant emotion probability [0..1]
+Each video becomes <name>_labels.npz:
+    frame_idx: (N,) int32   — which frames got analyzed
+    label:     (N,) int32   — index into EMOTIONS, or -1 (no confident face)
+    conf:      (N,) float32 — how sure the face model was
+
+Heads up: this is SLOW (deepface is not a fast library) and most frames of
+normal humans come out neutral. Don't be discouraged by the label counts.
 """
 import argparse
 from pathlib import Path
@@ -18,7 +20,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# Same order everywhere in this project. DeepFace names map onto these.
+# same order as everywhere else in the project. deepface uses slightly
+# different names, hence the map.
 EMOTIONS = ["happy", "sad", "angry", "fearful", "surprised", "disgusted", "neutral"]
 DEEPFACE_MAP = {
     "happy": 0, "sad": 1, "angry": 2, "fear": 3,
@@ -28,7 +31,7 @@ VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 
 def label_video(video_path: Path, out_dir: Path, every: int, min_conf: float) -> None:
-    from deepface import DeepFace  # heavy import; keep local
+    from deepface import DeepFace  # heavy import, keep it inside the function
 
     cap = cv2.VideoCapture(str(video_path))
     frame_idxs, labels, confs = [], [], []
@@ -37,7 +40,7 @@ def label_video(video_path: Path, out_dir: Path, every: int, min_conf: float) ->
         ok, frame = cap.read()
         if not ok:
             break
-        if idx % every == 0:
+        if idx % every == 0:  # analyzing every single frame would take forever
             label, conf = -1, 0.0
             try:
                 res = DeepFace.analyze(
@@ -50,7 +53,7 @@ def label_video(video_path: Path, out_dir: Path, every: int, min_conf: float) ->
                 if conf >= min_conf and dom in DEEPFACE_MAP:
                     label = DEEPFACE_MAP[dom]
             except Exception:
-                pass  # no face found — leave unlabeled
+                pass  # no face this frame — that's fine, stays -1
             frame_idxs.append(idx)
             labels.append(label)
             confs.append(conf)
