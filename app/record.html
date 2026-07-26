@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0b0d10">
-<title>MotionEmotion — Record Clips</title>
+<title>MotionEmotion — record clips</title>
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,45 +12,70 @@
 <style>
   :root {
     --bg: #0b0d10; --panel: #12151a; --border: #242a31; --border-soft: #1b2026;
-    --text: #e8eaed; --muted: #8f98a3; --accent: #4c9aff; --rec: #f85149;
+    --text: #e8eaed; --muted: #8f98a3; --faint: #5d6670;
+    --accent: #4c9aff; --rec: #f85149;
+    --ease: cubic-bezier(.4, 0, .2, 1);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html { color-scheme: dark; }
+  html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
   body {
     background: var(--bg); color: var(--text);
     font-family: "Inter", -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-size: 15px; line-height: 1.5;
-    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-    padding: 0 20px 28px;
+    font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+    min-height: 100vh; min-height: 100dvh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 0 20px calc(28px + env(safe-area-inset-bottom));
   }
-  header {
-    width: 100%; max-width: 720px; display: flex; align-items: center; gap: 10px;
-    padding: 18px 2px 6px; font-weight: 600; font-size: 1.05rem;
-  }
-  header .dim { color: var(--muted); font-weight: 400; }
-  header a { color: var(--muted); font-size: .8rem; margin-left: auto; text-decoration: none; }
-  header a:hover { color: var(--text); }
-  .subtitle { color: var(--muted); font-size: .85rem; max-width: 640px; text-align: center; margin-bottom: 18px; }
+  button { font: inherit; }
 
-  .video-wrap { position: relative; background: var(--panel); border: 1px solid var(--border-soft); border-radius: 14px; overflow: hidden; }
-  video { display: block; width: 640px; max-width: calc(100vw - 40px); transform: scaleX(-1); }
+  header {
+    width: 100%; max-width: 720px; display: flex; align-items: center; gap: 9px;
+    padding: 18px 2px 6px; font-weight: 600;
+  }
+  header svg { flex: none; }
+  header .dim { color: var(--muted); font-weight: 400; }
+  header a {
+    color: var(--muted); font-size: .82rem; margin-left: auto; text-decoration: none;
+    white-space: nowrap; transition: color .15s var(--ease);
+  }
+  header a:hover { color: var(--text); }
+  .subtitle {
+    color: var(--muted); font-size: .88rem; max-width: 520px;
+    text-align: center; margin-bottom: 18px;
+  }
+
+  .video-wrap {
+    position: relative; background: var(--panel); border: 1px solid var(--border-soft);
+    border-radius: 14px; overflow: hidden; aspect-ratio: 4 / 3;
+    width: 100%; max-width: 640px;
+  }
+  video { display: block; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
   .countdown {
     position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
-    font-size: 6rem; font-weight: 600; background: rgba(11,13,16,.5); backdrop-filter: blur(2px);
+    font-size: clamp(3.5rem, 14vw, 6rem); font-weight: 600;
+    background: rgba(11,13,16,.5); backdrop-filter: blur(2px);
   }
   .rec-dot {
-    position: absolute; top: 14px; right: 14px; display: none; align-items: center; gap: 8px;
+    position: absolute; top: 12px; right: 12px; display: none; align-items: center; gap: 8px;
     background: rgba(11,13,16,.72); border: 1px solid var(--border);
-    padding: 6px 13px; border-radius: 999px; font-size: .85rem;
+    padding: 6px 13px; border-radius: 999px; font-size: .85rem; backdrop-filter: blur(8px);
   }
   .rec-dot .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--rec); animation: blink 1s infinite; }
   @keyframes blink { 50% { opacity: .25; } }
+  .idle-note {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: .88rem; transition: opacity .3s var(--ease);
+  }
+  .idle-note.hide { opacity: 0; }
 
-  .emos { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 16px; max-width: 680px; }
+  .emos {
+    display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+    margin-top: 16px; max-width: 680px;
+  }
   .emo-btn {
-    font: inherit; background: var(--panel); color: var(--text);
-    border: 1px solid var(--border); border-radius: 10px; padding: 9px 15px; cursor: pointer;
-    transition: border-color .15s ease;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 10px; padding: 9px 15px; cursor: pointer;
+    transition: border-color .15s var(--ease), background .15s var(--ease);
   }
   .emo-btn:hover { border-color: var(--muted); }
   .emo-btn.sel { border-color: var(--accent); background: #4c9aff1c; }
@@ -62,16 +87,28 @@
     border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; text-align: center;
   }
   button.primary {
-    font: inherit; font-weight: 500; background: var(--accent); color: #08101c;
-    border: none; border-radius: 10px; padding: 9px 22px; cursor: pointer;
+    font-weight: 500; background: var(--accent); color: #08101c;
+    border: none; border-radius: 10px; padding: 10px 22px; cursor: pointer;
+    transition: background .15s var(--ease), opacity .15s var(--ease);
   }
+  button.primary:hover:not(:disabled) { background: #63a9ff; }
   button.primary:disabled { opacity: .45; cursor: default; }
 
-  #status { margin-top: 12px; color: var(--muted); font-size: .84rem; min-height: 1.3em; }
+  #status { margin-top: 12px; color: var(--muted); font-size: .84rem; min-height: 1.3em; text-align: center; }
   .log { margin-top: 8px; font-size: .8rem; color: var(--muted); max-width: 640px; text-align: center; }
   .log b { color: var(--text); font-weight: 500; }
-  footer { margin-top: 22px; color: #5d6670; font-size: .74rem; max-width: 620px; text-align: center; }
-  footer code { color: var(--muted); }
+  footer { margin-top: 22px; color: var(--faint); font-size: .74rem; max-width: 560px; text-align: center; }
+  footer code { color: var(--muted); word-break: break-word; }
+
+  @media (max-width: 760px) {
+    body { padding-left: 14px; padding-right: 14px; }
+    .row { width: 100%; }
+    button.primary { flex: 1 1 auto; }
+    .emo-btn { padding: 8px 13px; font-size: .92rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
 </style>
 </head>
 <body>
@@ -82,15 +119,16 @@
       <path d="M13 20c1.6-2.4 4-4 7-4.4" stroke="#2c5f9e" stroke-width="2.4" stroke-linecap="round"/>
     </svg>
     Motion<span class="dim">Emotion</span>&nbsp;<span class="dim">/ recorder</span>
-    <a href="index.html">← back to the app</a>
+    <a href="index.html">← back</a>
   </header>
   <div class="subtitle">
-    Pick an emotion, hit record, act it out with your whole body (exaggerate! nobody's watching).
-    Each clip downloads itself with the label baked into the filename.
+    Pick an emotion, hit record, act it out with your whole body — exaggerate, nobody's watching.
+    Each clip downloads itself with the label already in the filename.
   </div>
 
   <div class="video-wrap">
     <video id="video" autoplay playsinline muted></video>
+    <div class="idle-note" id="idleNote">Camera is off</div>
     <div class="countdown" id="countdown">3</div>
     <div class="rec-dot" id="recDot"><span class="dot"></span><span id="recTime">0s</span></div>
   </div>
@@ -106,8 +144,8 @@
   <div class="log" id="log"></div>
 
   <footer>
-    Aim for ~10–20 clips per emotion, as varied as you can make them — different rooms,
-    different people if you can rope friends in. Then dump every clip into one folder and run
+    Aim for ~10–20 clips per emotion, as varied as you can make them — different rooms, different
+    people if you can rope friends in. Then dump every clip into one folder and run
     <code>python acted_label.py --videos thatfolder --out data_acted</code>.
     Everything stays on your machine.
   </footer>
@@ -127,6 +165,7 @@ const recTime = document.getElementById("recTime");
 const statusEl = document.getElementById("status");
 const logEl = document.getElementById("log");
 const recordBtn = document.getElementById("recordBtn");
+const idleNote = document.getElementById("idleNote");
 
 // one button per emotion
 const box = document.getElementById("emoButtons");
@@ -152,8 +191,11 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function startCamera() {
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+    });
     video.srcObject = stream;
+    idleNote.classList.add("hide");
     recordBtn.textContent = "● Record clip";
     recordBtn.onclick = recordClip;
     statusEl.textContent = "Pick an emotion, then record.";
