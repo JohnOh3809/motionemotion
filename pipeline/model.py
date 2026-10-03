@@ -1,4 +1,4 @@
-"""The models. LSTM is the workhorse, transformer is the "someday" option."""
+"""Sequence classifiers for pose features: BiLSTM and transformer."""
 import torch
 import torch.nn as nn
 
@@ -6,7 +6,7 @@ from dataset import FEAT_DIM, NUM_CLASSES
 
 
 class LSTMEmotion(nn.Module):
-    """BiLSTM over keypoint windows. Small enough to train on anything."""
+    """BiLSTM classifier with mean pooling over each pose window."""
 
     def __init__(self, feat_dim=FEAT_DIM, hidden=128, layers=2, num_classes=NUM_CLASSES, dropout=0.3):
         super().__init__()
@@ -19,19 +19,17 @@ class LSTMEmotion(nn.Module):
             nn.Linear(64, num_classes),
         )
 
-    # pooled() is split out so train.py can bolt the valence/arousal head
-    # onto the same encoding without touching the classifier
+    # Expose the shared encoding for the optional valence/arousal head.
     def pooled(self, x):  # (B, T, feat) -> (B, 2*hidden)
         h, _ = self.lstm(self.proj(x))
-        return h.mean(dim=1)  # mean over time. tried last-hidden, this was better
+        return h.mean(dim=1)  # mean over time
 
     def forward(self, x):
         return self.head(self.pooled(x))
 
 
 class TransformerEmotion(nn.Module):
-    """Tiny transformer encoder. Probably overkill until there's way more data,
-    but it's here for when the clip library grows."""
+    """Transformer classifier with learned positional embeddings."""
 
     def __init__(self, feat_dim=FEAT_DIM, d_model=128, heads=4, layers=3,
                  num_classes=NUM_CLASSES, dropout=0.2, max_len=256):

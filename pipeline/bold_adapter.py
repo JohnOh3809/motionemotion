@@ -70,7 +70,7 @@ def video_frame_count(path: Path) -> int:
             return n
     except Exception:
         pass
-    return 300  # BoLD clips are 50-150 frames; generous fallback is harmless
+    return 300  # fallback when video metadata is unavailable
 
 
 def load_split(bold: Path, split: str):

@@ -3,16 +3,12 @@
 Basic run:
     python train.py --poses data/poses --labels data/labels
 
-Flags worth knowing:
-  --merge5        7 classes is ambitious for body-only signals. This folds the
-                  two hopeless ones into their nearest neighbors (disgusted->angry,
-                  surprised->fearful) and trains 5 instead. Use this if you care
-                  about accuracy more than coverage.
-  --va-weight 0.3 adds a little valence/arousal regression head during training.
-                  bodies broadcast arousal way better than they broadcast
-                  "disgust vs anger", so giving the encoder that side-task helps.
-                  training-only — the saved model / ONNX export look identical.
-  --model transformer   if you're feeling fancy (needs more data than i have)
+Options:
+  --merge5        Train five classes by mapping disgusted to angry and
+                  surprised to fearful. Compare results on the target data.
+  --va-weight 0.3 Add an auxiliary valence/arousal loss during training.
+                  The auxiliary head is excluded from the saved classifier.
+  --model transformer   Use the transformer instead of the default BiLSTM.
 """
 import argparse
 from pathlib import Path
@@ -25,12 +21,10 @@ from torch.utils.data import DataLoader, TensorDataset
 from dataset import EMOTIONS, NUM_CLASSES, build_dataset
 from model import build_model
 
-# the pairs bodies genuinely can't tell apart (see the confusion matrix if
-# you don't believe me)
+# Optional label mapping for five-class training.
 MERGE5 = {"disgusted": "angry", "surprised": "fearful"}
 
-# rough (valence, arousal) anchor per emotion, circumplex-style, in [-1, 1].
-# these don't need to be precise — they just need the geometry to be sane.
+# Approximate valence/arousal targets in [-1, 1] for the auxiliary loss.
 VA_ANCHORS = {
     "happy": (0.8, 0.6), "sad": (-0.7, -0.5), "angry": (-0.6, 0.8),
     "fearful": (-0.7, 0.7), "surprised": (0.3, 0.8), "disgusted": (-0.6, 0.3),
@@ -77,15 +71,14 @@ def main():
     tr_dl = DataLoader(tr, batch_size=args.batch, shuffle=True)
     va_dl = DataLoader(va, batch_size=args.batch)
 
-    # face-labeled data ends up ~80% neutral (people mostly just... stand there),
-    # so weight the loss or the model learns to answer "neutral" forever
+    # Weight classes by inverse frequency to reduce majority-class bias.
     counts = np.bincount(y[tr_idx], minlength=n_classes).astype(np.float32)
     weights = torch.tensor(counts.sum() / np.clip(counts, 1, None) / n_classes,
                            dtype=torch.float32, device=device)
 
     model = build_model(args.model, num_classes=n_classes).to(device)
 
-    # optional valence/arousal side-head, bolted onto the shared encoding
+    # Optional valence/arousal head uses the shared encoding.
     va_head, va_targets = None, None
     params = list(model.parameters())
     if args.va_weight > 0:

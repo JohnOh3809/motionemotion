@@ -1,6 +1,5 @@
-// service worker — this is what makes the thing installable and lets it
-// work offline once you've opened it a couple times. the pose model + wasm
-// come off CDNs on first load and get cached like everything else.
+// Cache the app shell and fetched assets for subsequent offline use.
+// Pose assets are downloaded from CDNs on first use.
 const CACHE = "motionemotion-v1"; // bump this when the shell changes
 const SHELL = ["./", "index.html", "record.html", "manifest.webmanifest",
                "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
@@ -37,7 +36,7 @@ self.addEventListener("fetch", (e) => {
       const fetched = fetch(e.request).then((res) => {
         if (res.ok) caches.open(CACHE).then((c) => c.put(e.request, res.clone())).catch(() => {});
         return res.clone();
-      }).catch(() => hit); // offline? cached copy it is
+      }).catch(() => hit); // retain the cached response if the refresh fails
       return hit || fetched;
     })
   );
