@@ -122,8 +122,8 @@
     <a href="index.html">← back</a>
   </header>
   <div class="subtitle">
-    Pick an emotion, hit record, act it out with your whole body — exaggerate, nobody's watching.
-    Each clip downloads itself with the label already in the filename.
+    Choose an emotion and record a short example of it through body movement.
+    Each clip downloads with the emotion in its filename.
   </div>
 
   <div class="video-wrap">
@@ -144,8 +144,8 @@
   <div class="log" id="log"></div>
 
   <footer>
-    Aim for ~10–20 clips per emotion, as varied as you can make them — different rooms, different
-    people if you can rope friends in. Then dump every clip into one folder and run
+    Start with 10–20 clips per emotion. Vary the movements, recording locations, and
+    participants. Save the clips in one folder, then run
     <code>python acted_label.py --videos thatfolder --out data_acted</code>.
     Everything stays on your machine.
   </footer>
@@ -207,8 +207,7 @@ async function startCamera() {
 async function recordClip() {
   recordBtn.disabled = true;
 
-  // 3..2..1 so you have time to get into position (700ms each — a full
-  // second felt like forever standing there)
+  // Count down in 700 ms steps before recording.
   countdownEl.style.display = "flex";
   for (let i = 3; i > 0; i--) { countdownEl.textContent = i; await sleep(700); }
   countdownEl.style.display = "none";
@@ -222,7 +221,7 @@ async function recordClip() {
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   recorder.onstop = () => {
     const blob = new Blob(chunks, { type: "video/webm" });
-    // the filename IS the label — acted_label.py reads the prefix
+    // acted_label.py uses the emotion prefix as the clip label.
     const fname = `${emo}_${Date.now()}.webm`;
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);

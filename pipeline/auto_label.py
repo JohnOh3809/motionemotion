@@ -1,8 +1,8 @@
-"""Let a face model do the labeling for us (the whole idea of this project).
+"""Generate pose-training labels from facial-expression predictions.
 
 Record people moving with their face visible. DeepFace reads the face and
 labels each moment; later the pose model learns to predict the same emotion
-from the body alone. Face = teacher, body = student.
+from body movement alone.
 
     python auto_label.py --videos data/videos --out data/labels [--every 5] [--min-conf 0.55]
 
@@ -11,8 +11,7 @@ Each video becomes <name>_labels.npz:
     label:     (N,) int32   — index into EMOTIONS, or -1 (no confident face)
     conf:      (N,) float32 — how sure the face model was
 
-Heads up: this is SLOW (deepface is not a fast library) and most frames of
-normal humans come out neutral. Don't be discouraged by the label counts.
+DeepFace inference can be slow. Check class counts for imbalance before training.
 """
 import argparse
 from pathlib import Path
@@ -40,7 +39,7 @@ def label_video(video_path: Path, out_dir: Path, every: int, min_conf: float) ->
         ok, frame = cap.read()
         if not ok:
             break
-        if idx % every == 0:  # analyzing every single frame would take forever
+        if idx % every == 0:  # sample frames to limit inference cost
             label, conf = -1, 0.0
             try:
                 res = DeepFace.analyze(
@@ -53,7 +52,7 @@ def label_video(video_path: Path, out_dir: Path, every: int, min_conf: float) ->
                 if conf >= min_conf and dom in DEEPFACE_MAP:
                     label = DEEPFACE_MAP[dom]
             except Exception:
-                pass  # no face this frame — that's fine, stays -1
+                pass  # leave failed detections unlabeled
             frame_idxs.append(idx)
             labels.append(label)
             confs.append(conf)

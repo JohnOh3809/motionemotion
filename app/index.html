@@ -208,8 +208,8 @@
   <section class="intro" id="intro">
     <h1>Emotion, read from how you move</h1>
     <p class="lede">
-      Not everyone shows what they feel on their face. This watches your body instead —
-      posture, energy, how sharply you move — and tells you what it reads.
+      MotionEmotion estimates emotion from posture and movement using your webcam.
+      Try different gestures and see how the predictions change.
     </p>
 
     <ul class="points">
@@ -219,11 +219,11 @@
       </li>
       <li>
         <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5"/></svg>
-        <span><b>It admits when it's unsure</b> instead of guessing — an app shouldn't speak over you.</span>
+        <span><b>Uncertain results show “not sure”.</b> Predictions are estimates of emotion.</span>
       </li>
       <li>
         <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 20v-6M6 20v-4M18 20v-9"/><path d="M3 20h18"/></svg>
-        <span><b>It calibrates to you.</b> Three seconds of standing still teaches it your normal.</span>
+        <span><b>It calibrates to you.</b> Stand relaxed for three seconds to set a baseline for the motion classifier.</span>
       </li>
     </ul>
 
@@ -266,15 +266,14 @@
   </div>
 
   <footer>
-    Drop a trained <code>motionemotion.onnx</code> next to this page and it gets used automatically —
-    otherwise an interpretable heuristic classifier runs. Built as a starting point, not a diagnosis.
+    Experimental emotion estimates from movement. To use a trained model, place
+    <code>motionemotion.onnx</code> and its JSON metadata in the app folder. These predictions are not a diagnosis.
   </footer>
 
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
-// register the service worker so this installs like a real app
-// (only works over http(s) — double-clicked file:// pages don't get one)
+// Register the service worker on served pages.
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
@@ -331,9 +330,7 @@ for (const e of EMOTIONS) {
   barVals[e.name] = row.querySelector(".bar-val");
 }
 
-// ===== the learned model (if there is one) =====
-// once you've trained something with the pipeline and exported it, drop
-// motionemotion.onnx (+ its .json) next to this file and it just gets used.
+// Load motionemotion.onnx and its class metadata when available.
 let session = null, ort = null;
 let modelMeta = { emotions: EMOTIONS.map(e => e.name), window: 45 };
 let lastInferT = 0, modelProbs = null;
@@ -360,10 +357,8 @@ async function tryLoadModel() {
 }
 tryLoadModel();
 
-// this MUST stay in sync with to_features() in pipeline/dataset.py:
-// center on hips, scale by torso, xy + per-frame velocity, [x,y,vx,vy] per
-// joint = 132 numbers a frame. if they drift apart the model still runs,
-// it just predicts nonsense. (there's a parity test in the repo history.)
+// Match to_features() in pipeline/dataset.py: hip-centered, torso-scaled
+// [x, y, vx, vy] per landmark, giving 132 features per frame.
 function toModelFeatures(frames) {
   const T = frames.length, F = 132;
   const xy = frames.map(pts => {
@@ -403,8 +398,8 @@ async function runModel(rawBuf, t) {
 }
 
 // ===== rolling pose buffers =====
-// two buffers because the two brains want different things: the heuristics
-// look at ~2s of derived motion, the model wants 45 raw frames.
+// The heuristic uses a two-second motion window. The learned model uses
+// raw landmark frames, with the window length read from its metadata.
 const WINDOW_MS = 2000;
 const buffer = [];      // { t, pts } for the heuristics
 const rawBuf = [];      // plain landmark frames for the model
@@ -421,8 +416,7 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
 // ===== hand-made motion features =====
-// these are the things a human would actually describe: how much you're
-// moving, how sharply, whether your arms are open, head hanging, etc.
+// Derive movement speed, acceleration, and posture features.
 function computeFeatures() {
   if (buffer.length < 6) return null;
   const latest = buffer[buffer.length - 1].pts;
@@ -477,10 +471,8 @@ function computeFeatures() {
 }
 
 // ===== calibration =====
-// nobody's "neutral" looks the same — some people fidget standing still,
-// some naturally slouch. 3 seconds of you doing nothing gives us a baseline
-// to subtract, so the classifier reacts to CHANGE from your normal instead
-// of judging your posture. matters a lot for who this app is for.
+// Capture a three-second baseline for the heuristic classifier.
+// Subtract it from current features to measure changes in posture and motion.
 const CAL_REF = { energy: 0.20, headDrop: 0.70, armSpread: 1.50, tremble: 0.30, contraction: 0.30, handsUp: -0.80 };
 let calib = null;
 let calSamples = null;
@@ -514,16 +506,14 @@ function startCalibration() {
       calib[k] = calSamples.reduce((a, s) => a + s[k], 0) / calSamples.length;
     calSamples = null;
     smoothed = null; // reset smoothing so the change shows immediately
-    statusEl.textContent = "Calibrated to your neutral — it now measures change relative to you.";
+    statusEl.textContent = "Baseline saved for the motion classifier.";
     calBtn.textContent = "Recalibrate";
   }, 1000);
 }
 calBtn.addEventListener("click", startCalibration);
 
-// ===== the starter brain =====
-// hand-tuned scores -> softmax. every weight here came from me acting out
-// emotions at my webcam and nudging numbers, so, you know. it's a baseline.
-// train the real model and this whole block gets bypassed.
+// Heuristic classifier used when no trained model is loaded.
+// Convert weighted motion-feature scores to probabilities with softmax.
 const sig = (x) => 1 / (1 + Math.exp(-x));
 function scoreEmotions(f) {
   const s = {};
@@ -544,7 +534,7 @@ function scoreEmotions(f) {
   return p;
 }
 
-// smooth the probabilities so the bars don't have a seizure
+// Smooth probabilities to reduce flicker between frames.
 let smoothed = null;
 function smooth(p, alpha = 0.12) {
   if (!smoothed) { smoothed = { ...p }; return smoothed; }
@@ -573,8 +563,7 @@ function drawSkeleton(pts) {
   }
 }
 
-// the one rule i care about most: if the numbers are mushy, SAY SO.
-// an assistive app that confidently guesses wrong speaks over the person.
+// Show uncertainty when the leading score is low or too close to the runner-up.
 const MIN_TOP = 0.34, MIN_MARGIN = 0.07;
 
 function render(p, f) {
@@ -622,7 +611,7 @@ async function init() {
   try {
     landmarker = await PoseLandmarker.createFromOptions(vision, opts("GPU"));
   } catch {
-    // some phones / older GPUs choke on the webgl delegate — cpu still runs fine
+    // Retry with CPU inference if GPU initialization fails.
     landmarker = await PoseLandmarker.createFromOptions(vision, opts("CPU"));
   }
 }
@@ -653,7 +642,7 @@ async function start() {
     running = true;
     veil.classList.add("hide");
     calBtn.disabled = false;
-    statusEl.textContent = "Move your body to express something. Calibrating your neutral first makes it noticeably better.";
+    statusEl.textContent = "Try a few gestures. Use Calibrate neutral to set a baseline for the motion classifier.";
     requestAnimationFrame(loop);
   } catch (err) {
     veil.classList.remove("hide");

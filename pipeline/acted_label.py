@@ -1,15 +1,14 @@
-"""Label acted clips from their filenames. No face model, no waiting.
+"""Label recorded clips by emotion folder or filename prefix.
 
-If you KNOW the emotion because you acted it, the label is free. Two layouts
-both work:
+Use the intended emotion as the clip label. Supported layouts:
 
   A) subfolders:       clips/happy/take1.mp4, clips/sad/take2.mp4, ...
   B) filename prefix:  clips/happy_01.webm, clips/sad_02.webm, ...
 
-record.html spits out option (B) automatically, so that's the usual path.
+record.html saves clips with an emotion prefix, as in option B.
 
 This flattens everything into <out>/videos/ and writes <out>/labels/ in the
-same format auto_label.py uses, labeling every frame with the acted emotion.
+same format auto_label.py uses, sampling labels every five frames with the intended emotion.
 
     python acted_label.py --videos clips --out data_acted
     python extract_poses.py --videos data_acted/videos --out data_acted/poses
@@ -24,7 +23,7 @@ import numpy as np
 
 EMOTIONS = ["happy", "sad", "angry", "fearful", "surprised", "disgusted", "neutral"]
 EMO_INDEX = {e: i for i, e in enumerate(EMOTIONS)}
-# people name folders all kinds of ways, accept the obvious ones
+# Accept common alternatives to the class names.
 ALIASES = {"fear": "fearful", "scared": "fearful", "surprise": "surprised",
            "disgust": "disgusted", "mad": "angry", "calm": "neutral"}
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
@@ -51,7 +50,7 @@ def frame_count(path: Path) -> int:
             return n
     except Exception:
         pass
-    return 300  # ~10s guess if cv2 can't tell us; close enough for labels
+    return 300  # fallback frame count when video metadata is unavailable
 
 
 def main():
@@ -82,7 +81,7 @@ def main():
         if not dst.exists():
             (shutil.copy2 if args.copy else lambda s, d: os.symlink(Path(s).resolve(), d))(clip, dst)
 
-        # every 5th frame gets a label row, conf 1.0 — we acted it, we're sure
+        # Use weight 1.0 for supplied clip labels; this is not a confidence estimate.
         n = frame_count(clip)
         idx = np.arange(0, n, 5, dtype=np.int32)
         np.savez_compressed(

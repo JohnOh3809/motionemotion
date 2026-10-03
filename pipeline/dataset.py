@@ -1,22 +1,18 @@
-"""Turns pose files + label files into actual training data.
+"""Build training windows from matching pose and label files.
 
-The deal: extract_poses.py gives us data/poses/<name>.npz, the labelers give
-us data/labels/<name>_labels.npz. This pairs them up, chops the pose stream
-into fixed windows, and gives each window whatever label won the vote inside
-it. Windows where no label clearly wins get thrown out — ambiguous data is
-worse than less data (learned this the hard way).
+Pairs data/poses/<name>.npz with data/labels/<name>_labels.npz.
+Each window gets a confidence-weighted label; windows with insufficient
+label agreement or too many missing poses are skipped.
 
-Normalization: every frame gets centered on the hip midpoint and scaled by
-torso length. So it doesn't matter if you filmed from 2m or 5m away, or if
-you're standing off to the side — the model only ever sees body shape and
-how it moves. 33 joints * (xy + velocity xy) = 132 numbers per frame.
+Coordinates are centered on the hips and scaled by torso length to reduce
+variation from camera position and distance. Each frame contains 132
+features: x, y, vx, vy for each of the 33 landmarks.
 """
 from pathlib import Path
 
 import numpy as np
 
-# this order is basically sacred — the app, the labelers and the checkpoints
-# all assume it. don't reorder!
+# Class indices must match the app, label files, and checkpoints.
 EMOTIONS = ["happy", "sad", "angry", "fearful", "surprised", "disgusted", "neutral"]
 NUM_CLASSES = len(EMOTIONS)
 L_SHOULDER, R_SHOULDER, L_HIP, R_HIP = 11, 12, 23, 24  # mediapipe indices
@@ -29,30 +25,29 @@ def normalize_frames(kp: np.ndarray) -> np.ndarray:
     hip_mid = (xy[:, L_HIP] + xy[:, R_HIP]) / 2
     sh_mid = (xy[:, L_SHOULDER] + xy[:, R_SHOULDER]) / 2
     torso = np.linalg.norm(sh_mid - hip_mid, axis=1, keepdims=True)
-    torso = np.clip(torso, 1e-4, None)  # divide-by-zero guard, don't ask how i know
+    torso = np.clip(torso, 1e-4, None)  # avoid division by zero
     return (xy - hip_mid[:, None, :]) / torso[:, None, :]
 
 
-# nb: if you change to_features in ANY way, change toModelFeatures() in
-# app/index.html to match, or the in-browser model will silently predict garbage.
+# Keep this feature layout in sync with toModelFeatures() in app/index.html.
 def to_features(kp: np.ndarray) -> np.ndarray:
     """(T, 33, 4) -> (T, 132). Position + frame-to-frame velocity."""
     xy = normalize_frames(kp)
     vel = np.zeros_like(xy)
-    vel[1:] = xy[1:] - xy[:-1]  # first frame just gets zero velocity, fine
+    vel[1:] = xy[1:] - xy[:-1]  # no previous frame for the first velocity
     feats = np.concatenate([xy, vel], axis=2)
     return feats.reshape(len(kp), -1).astype(np.float32)
 
 
 def window_label(frame_idx, labels, confs, start, end, min_frac=0.5):
-    """Confidence-weighted vote inside [start, end). Returns -1 if it's a mess."""
+    """Confidence-weighted vote inside [start, end). Returns -1 if label agreement is too low."""
     m = (frame_idx >= start) & (frame_idx < end) & (labels >= 0)
     if m.sum() == 0:
         return -1
     votes = np.bincount(labels[m], weights=confs[m], minlength=NUM_CLASSES)
     winner = int(votes.argmax())
     if (labels[m] == winner).mean() < min_frac:
-        return -1  # half the frames disagree with the "winner" -> skip it
+        return -1  # winning label has insufficient frame coverage
     return winner
 
 
@@ -69,7 +64,7 @@ def build_dataset(poses_dir, labels_dir, window=45, stride=15):
         ld = np.load(label_file)
         kp = pd["keypoints"]  # (T, 33, 4)
         if len(kp) < window:
-            continue  # clip shorter than one window, not much we can do
+            continue  # clip is shorter than one window
         # frames where mediapipe found nobody are NaN — track them, then zero them
         valid = ~np.isnan(kp[:, 0, 0])
         kp = np.where(np.isnan(kp), 0.0, kp)
